@@ -5,10 +5,35 @@ import os
 import socket
 import sys
 import json
+import subprocess
 
 home = os.environ['HOME']
 filelist = 'filelist'
 dotfiles = 'dotfiles'
+
+class Git:
+    def __init__(self):
+        pass
+
+    def run(self, cmd):
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as cp:
+            log('command', cmd, 'failed, output:\n',
+                    cp.stderr.decode(), level=0)
+            sys.exit(1)
+
+    def init(self):
+        log('git initing')
+        self.run(['git', 'init'])
+
+    def add(self, fname):
+        log('git adding', fname)
+        self.run(['git', 'add', fname])
+
+    def commit(self, msg):
+        log('git committing "{}"'.format(msg))
+        self.run(['git', 'commit', '-m', msg])
 
 # level 0: errors
 # level 1: informational
@@ -28,6 +53,18 @@ def log(*msg, level=2, pretty=False):
         print("ERROR:", *msg, file=sys.stderr)
     elif level <= args.verbose:
         print(*msg)
+
+def initialize_repo():
+    '''makes current dir as a dotgit repo'''
+
+    log('initializing dotgit repo')
+
+    git.init()
+    with open(filelist, 'a') as f:
+        pass
+
+    git.add(filelist)
+    git.commit('initial dotgit commit')
 
 def safety_checks():
     '''runs various startup safety checks.
@@ -118,6 +155,12 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     log("called with arguments:", vars(args))
+
+    git = Git()
+
+    if args.action == 'init':
+        initialize_repo()
+        sys.exit(0)
 
     # run safety checks before starting
     safety_checks()
