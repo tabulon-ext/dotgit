@@ -101,11 +101,20 @@ def parse_filelist(flist):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('action')
-    # TODO: make this argument optional
-    parser.add_argument('categories', default=socket.gethostname())
+    valid_actions = {
+            'init',
+            'update',
+            'restore',
+            'clean',
+            'diff',
+            }
+
     # TODO: make the default 0 again
     parser.add_argument('--verbose', '-v', action='count', default=4)
+    parser.add_argument('action', choices=valid_actions)
+    parser.add_argument('--hard', action='store_true')
+    parser.add_argument('category', nargs='*',
+            default=socket.gethostname())
 
     args = parser.parse_args()
     log("called with arguments:", vars(args))
