@@ -4,25 +4,38 @@ import argparse
 import os
 import socket
 import sys
+import json
 
 home = os.environ['HOME']
 filelist = 'filelist'
 dotfiles = 'dotfiles'
 
-files = {}
-
-# level 2: debug
-# level 1: informational
 # level 0: errors
-def log(*msg, level=2):
+# level 1: informational
+# level 2: debug
+# level 3: variables
+def log(*msg, level=2, pretty=False):
     global args
+
+    # prettify dicts
+    if pretty:
+        msg = list(msg)
+        for i in range(len(msg)):
+            if type(msg[i]) is dict:
+                msg[i] = json.dumps(msg[i], sort_keys=True, indent=1)
+
     if level == 0:
         print("ERROR:", *msg, file=sys.stderr)
     elif level <= args.verbose:
         print(*msg)
 
 def safety_checks():
-    log('doing safety checks')
+    '''runs various startup safety checks.
+
+    will call sys.exit(1) if a problem is found.
+    '''
+
+    log('running safety checks')
 
     if os.getcwd() == home:
         log('Refusing to run dotgit in your home directory, aborting', level=0)
@@ -36,46 +49,69 @@ def safety_checks():
         log('Cannot find filelist, aborting', level=0)
         sys.exit(1)
 
-    try:
-        os.makedirs(dotfiles)
-    except OSError:
-        log('Cannot create dotfiles directory, aborting', level=0)
-        sys.exit(1)
+    if not os.path.isdir(dotfiles):
+        try:
+            os.makedirs(dotfiles)
+        except OSError:
+            log('Cannot create dotfiles directory, aborting', level=0)
+            sys.exit(1)
 
-def parse_filelist():
-    with open(filelist, 'r') as f:
+def parse_filelist(flist):
+    '''parses the filelist
+    :param flist: the filelist path
+    :returns: a tuple (files, categories, groups)
+    '''
+
+    log('parsing filelist')
+
+    files = {}
+    categories = {}
+    groups = {}
+
+    with open(flist, 'r') as f:
         lines = f.readlines()
 
         for line in lines:
             line = line.strip()
             if not line:
                 continue
-            if line.beginswith('#'):
+            if line.startswith('#'):
                 continue
 
             if ':' in line:
-                filename, categories = line.split(':')
-                categories = categories.split(',')
+                fname, cat = line.split(':')
+                cat = cat.split(',')
+                files[fname] = files.get(fname, []) + [*cat]
+                for c in cat:
+                    categories[c] = categories.get(c, []) + [fname]
             elif '=' in line:
-                group, categories = line.split('=')
-                categories = categories.splot(',')
+                group, cat = line.split('=')
+                cat = cat.split(',')
+                groups[group] = cat
             else:
-                log('syntax error for line: ', line, level=0)
-                sys.exit(1)
+                files[line] = ['common']
+                categories['common'] = categories.get('common', []) + [line]
 
-parser = argparse.ArgumentParser()
+    log('filelist', filelist, 'parsed')
+    log('({}) files:'.format(filelist), files, pretty=True, level=4)
+    log('({}) categories:'.format(filelist), categories, pretty=True, level=4)
+    log('({}) groups:'.format(filelist), groups, pretty=True, level=4)
+    return files, categories, groups
 
-parser.add_argument('action')
-# TODO: make this argument optional
-parser.add_argument('categories', default=socket.gethostname())
-# TODO: make the default 0 again
-parser.add_argument('--verbose', '-v', action='count', default=2)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
 
-args = parser.parse_args()
-log("called with arguments:", vars(args))
+    parser.add_argument('action')
+    # TODO: make this argument optional
+    parser.add_argument('categories', default=socket.gethostname())
+    # TODO: make the default 0 again
+    parser.add_argument('--verbose', '-v', action='count', default=4)
 
-# run safety checks before starting
-safety_checks()
+    args = parser.parse_args()
+    log("called with arguments:", vars(args))
 
-# parse filelist
-parse_filelist()
+    # run safety checks before starting
+    safety_checks()
+
+    # parse filelist
+    files, categories, groups = parse_filelist(filelist)
