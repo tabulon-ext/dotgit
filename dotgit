@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+
+import argparse
+import os
+import socket
+import sys
+
+home = os.environ['HOME']
+filelist = 'filelist'
+dotfiles = 'dotfiles'
+
+files = {}
+
+# level 2: debug
+# level 1: informational
+# level 0: errors
+def log(*msg, level=2):
+    global args
+    if level == 0:
+        print("ERROR:", *msg, file=sys.stderr)
+    elif level <= args.verbose:
+        print(*msg)
+
+def safety_checks():
+    log('doing safety checks')
+
+    if os.getcwd() == home:
+        log('Refusing to run dotgit in your home directory, aborting', level=0)
+        sys.exit(1)
+
+    if not os.path.isdir('.git'):
+        log('This does not appear to be a git repo, aborting', level=0)
+        sys.exit(1)
+
+    if not os.path.isfile(filelist):
+        log('Cannot find filelist, aborting', level=0)
+        sys.exit(1)
+
+    try:
+        os.makedirs(dotfiles)
+    except OSError:
+        log('Cannot create dotfiles directory, aborting', level=0)
+        sys.exit(1)
+
+def parse_filelist():
+    with open(filelist, 'r') as f:
+        lines = f.readlines()
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if line.beginswith('#'):
+                continue
+
+            if ':' in line:
+                filename, categories = line.split(':')
+                categories = categories.split(',')
+            elif '=' in line:
+                group, categories = line.split('=')
+                categories = categories.splot(',')
+            else:
+                log('syntax error for line: ', line, level=0)
+                sys.exit(1)
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument('action')
+# TODO: make this argument optional
+parser.add_argument('categories', default=socket.gethostname())
+# TODO: make the default 0 again
+parser.add_argument('--verbose', '-v', action='count', default=2)
+
+args = parser.parse_args()
+log("called with arguments:", vars(args))
+
+# run safety checks before starting
+safety_checks()
+
+# parse filelist
+parse_filelist()
