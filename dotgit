@@ -55,7 +55,7 @@ def log(*msg, level=2, pretty=False):
         print(*msg)
 
 def initialize_repo():
-    '''makes current dir as a dotgit repo'''
+    '''makes the current dir a dotgit repo'''
 
     log('initializing dotgit repo')
 
@@ -75,33 +75,32 @@ def safety_checks():
     log('running safety checks')
 
     if os.getcwd() == home:
-        log('Refusing to run dotgit in your home directory, aborting', level=0)
+        log('refusing to run dotgit in your home directory, aborting', level=0)
         sys.exit(1)
 
     if not os.path.isdir('.git'):
-        log('This does not appear to be a git repo, aborting', level=0)
+        log('this does not appear to be a git repo, aborting', level=0)
         sys.exit(1)
 
     if not os.path.isfile(filelist):
-        log('Cannot find filelist, aborting', level=0)
+        log('cannot find filelist, aborting', level=0)
         sys.exit(1)
 
     if not os.path.isdir(dotfiles):
         try:
             os.makedirs(dotfiles)
         except OSError:
-            log('Cannot create dotfiles directory, aborting', level=0)
+            log('cannot create dotfiles directory, aborting', level=0)
             sys.exit(1)
 
 def parse_filelist(flist):
     '''parses the filelist
     :param flist: the filelist path
-    :returns: a tuple (files, categories, groups)
+    :returns: a tuple (categories, groups)
     '''
 
     log('parsing filelist')
 
-    files = {}
     categories = {}
     groups = {}
 
@@ -117,23 +116,43 @@ def parse_filelist(flist):
 
             if ':' in line:
                 fname, cat = line.split(':')
-                cat = cat.split(',')
-                files[fname] = files.get(fname, []) + [*cat]
+                cat = sorted(cat.split(','))
                 for c in cat:
                     categories[c] = categories.get(c, []) + [fname]
             elif '=' in line:
                 group, cat = line.split('=')
-                cat = cat.split(',')
+                cat = sorted(cat.split(','))
                 groups[group] = cat
             else:
-                files[line] = ['common']
                 categories['common'] = categories.get('common', []) + [line]
 
     log('filelist', filelist, 'parsed')
-    log('({}) files:'.format(filelist), files, pretty=True, level=4)
     log('({}) categories:'.format(filelist), categories, pretty=True, level=4)
     log('({}) groups:'.format(filelist), groups, pretty=True, level=4)
-    return files, categories, groups
+    return categories, groups
+
+def active_categories(selected, categories, groups):
+    """determines the active categories by expanding the selected options
+
+    :param selected: the selected categories as they come from the program
+    arguments
+    :param categories: all the categories in the filelist
+    :param groups: the groups as defined in the filelist
+    :returns: a list of active categories
+    """
+
+    if not type(selected) is list:
+        selected = [selected]
+
+    # expand groups
+    selected = [groups.get(s, [s]) for s in selected]
+    selected = [i for j in selected for i in j]
+
+    # remove duplicates and make set
+    selected = set(selected)
+
+    # return intersection between selected and available categories
+    return sorted(list(set(categories) & selected))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -146,15 +165,15 @@ if __name__ == '__main__':
             'diff',
             }
 
-    # TODO: make the default 0 again
+    # TODO: make the default value for verbose 0 again
     parser.add_argument('--verbose', '-v', action='count', default=4)
-    parser.add_argument('action', choices=valid_actions)
     parser.add_argument('--hard', action='store_true')
+    parser.add_argument('action', choices=valid_actions)
     parser.add_argument('category', nargs='*',
             default=socket.gethostname())
 
     args = parser.parse_args()
-    log("called with arguments:", vars(args))
+    log('called with arguments:', vars(args))
 
     git = Git()
 
@@ -166,4 +185,7 @@ if __name__ == '__main__':
     safety_checks()
 
     # parse filelist
-    files, categories, groups = parse_filelist(filelist)
+    categories, groups = parse_filelist(filelist)
+
+    # determine active categories
+    categories = active_categories(args.category, categories, groups)
