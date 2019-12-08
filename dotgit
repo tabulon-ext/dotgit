@@ -46,7 +46,7 @@ def log(*msg, level=2, pretty=False):
     if pretty:
         msg = list(msg)
         for i in range(len(msg)):
-            if type(msg[i]) is dict:
+            if type(msg[i]) in [dict, list]:
                 msg[i] = json.dumps(msg[i], sort_keys=True, indent=1)
 
     if level == 0:
@@ -96,12 +96,12 @@ def safety_checks():
 def parse_filelist(flist):
     '''parses the filelist
     :param flist: the filelist path
-    :returns: a tuple (categories, groups)
+    :returns: a tuple (files, groups)
     '''
 
     log('parsing filelist')
 
-    categories = {}
+    files = {}
     groups = {}
 
     with open(flist, 'r') as f:
@@ -117,29 +117,30 @@ def parse_filelist(flist):
             if ':' in line:
                 fname, cat = line.split(':')
                 cat = sorted(cat.split(','))
-                for c in cat:
-                    categories[c] = categories.get(c, []) + [fname]
+                files[fname] = files.get(fname, []) + [cat]
             elif '=' in line:
                 group, cat = line.split('=')
                 cat = sorted(cat.split(','))
                 groups[group] = cat
             else:
-                categories['common'] = categories.get('common', []) + [line]
+                files[line] = files.get(line, []) + [['common']]
 
     log('filelist', filelist, 'parsed')
-    log('({}) categories:'.format(filelist), categories, pretty=True, level=4)
+    log('({}) files:'.format(filelist), files, pretty=True, level=4)
     log('({}) groups:'.format(filelist), groups, pretty=True, level=4)
-    return categories, groups
+    return files, groups
 
-def active_categories(selected, categories, groups):
-    """determines the active categories by expanding the selected options
+def active_files(files, selected, groups):
+    """determines the active files
 
+    :param files: all the files in the filelist
     :param selected: the selected categories as they come from the program
     arguments
-    :param categories: all the categories in the filelist
     :param groups: the groups as defined in the filelist
-    :returns: a list of active categories
+    :returns: a dict of the active files
     """
+
+    log('determining active files')
 
     if not type(selected) is list:
         selected = [selected]
@@ -151,8 +152,25 @@ def active_categories(selected, categories, groups):
     # remove duplicates and make set
     selected = set(selected)
 
-    # return intersection between selected and available categories
-    return sorted(list(set(categories) & selected))
+    # find intersection between selected and available categories
+    active = {f: [c for c in files[f] if set(c) & selected] for f in files}
+
+    # remove empty files (not selected)
+    active = {f: active[f] for f in active if active[f]}
+
+    # check for conflicting activated categories
+    if sum([len(active[f])-1 for f in active]):
+        log('conflicting categories for files activated, offending filenames:',
+                [f for f in active if len(active[f]) > 1],
+                pretty=True,
+                level=0)
+        sys.exit(1)
+
+    # flatten lists
+    active = {f: active[f][0] for f in active}
+
+    log('active files:', active, pretty=True, level=4)
+    return active
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -185,7 +203,7 @@ if __name__ == '__main__':
     safety_checks()
 
     # parse filelist
-    categories, groups = parse_filelist(filelist)
+    files, groups = parse_filelist(filelist)
 
-    # determine active categories
-    categories = active_categories(args.category, categories, groups)
+    # determine active files
+    files = active_files(files, args.category, groups)
