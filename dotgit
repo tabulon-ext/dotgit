@@ -54,6 +54,23 @@ def log(*msg, level=2, pretty=False):
     elif level <= args.verbose:
         print(*msg)
 
+def prompt(question, default=True):
+    if not question.endswith('?'):
+        question += '?'
+    opt = "[Yn]" if default else "[Ny]"
+
+    while True:
+        res = input(f"{question} {opt} ").lower()
+        if not res:
+            res = 'y' if default else 'n'
+
+        if res == 'yes' or res == 'y':
+            return True
+        if res == 'no' or res == 'n':
+            return False
+
+        print('invalid input, please enter "y" or "n"')
+
 def initialize_repo():
     '''makes the current dir a dotgit repo'''
 
@@ -172,6 +189,29 @@ def active_files(files, selected, groups):
     log('active files:', active, pretty=True, level=4)
     return active
 
+def gen_fname(category, filename):
+    return os.path.join(dotfiles, category), filename
+
+def run_update(active_files):
+    for fname in active_files:
+        categories = active_files[fname]
+
+        home_file = os.path.join(home, fname)
+        home_links = os.path.islink(home_file)
+        home_exists = os.path.isfile(home_file) and not home_links
+
+        files = {}
+        links = {}
+
+        for category in categories:
+            full = gen_fname(category, fname)
+            files[full] = os.path.isfile(full)
+            files[links] = os.path.islink(full)
+
+        file_count = len([f for f in files if files[f]])
+        link_count = len([f for f in links if links[f]])
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
@@ -207,3 +247,6 @@ if __name__ == '__main__':
 
     # determine active files
     files = active_files(files, args.category, groups)
+
+    if args.action == 'update':
+        run_update(files)
