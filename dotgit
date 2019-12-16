@@ -143,8 +143,8 @@ def parse_filelist(flist):
                 files[line] = files.get(line, []) + [['common']]
 
     log('filelist', filelist, 'parsed')
-    log('({}) files:'.format(filelist), files, pretty=True, level=4)
-    log('({}) groups:'.format(filelist), groups, pretty=True, level=4)
+    log('({}) files:'.format(filelist), files, pretty=True, level=3)
+    log('({}) groups:'.format(filelist), groups, pretty=True, level=3)
     return files, groups
 
 def active_files(files, selected, groups):
@@ -186,13 +186,33 @@ def active_files(files, selected, groups):
     # flatten lists
     active = {f: active[f][0] for f in active}
 
-    log('active files:', active, pretty=True, level=4)
+    log('active files:', active, pretty=True, level=3)
     return active
 
 def gen_fname(category, filename):
     return os.path.join(dotfiles, category), filename
 
 def run_update(active_files):
+    # file operations
+    operations = []
+
+    def copy(src, dest):
+        operations.append(('c', src, dest))
+    def move(src, dest):
+        operations.append(('m', src, dest))
+    def home_move(src, dest):
+        if not args.hard:
+            move(src, dest)
+    def link(src, dest):
+        operations.append(('l', src, dest))
+    def home_link(src, dest):
+        if args.hard:
+            copy(src, dest)
+        else:
+            link(src, dest)
+    def rm(src):
+        operations.append(('r', src))
+
     for fname in active_files:
         categories = active_files[fname]
 
@@ -202,15 +222,77 @@ def run_update(active_files):
 
         files = {}
         links = {}
+        master = None
+        children = []
 
         for category in categories:
-            full = gen_fname(category, fname)
+            full = os.path.join(*gen_fname(category, fname))
+            if master is None:
+                master = full
+            else:
+                children.append(full)
             files[full] = os.path.isfile(full)
-            files[links] = os.path.islink(full)
+            links[full] = os.path.islink(full)
 
         file_count = len([f for f in files if files[f]])
         link_count = len([f for f in links if links[f]])
 
+        if file_count == 0 and link_count == 0:
+            if home_exists:
+                log(fname, 'new in repo from home', level=1)
+                home_move(home_file, master)
+                home_link(master, home_file)
+                for c in children:
+                    link(master, c)
+            else:
+                log(fname, 'is not in your home dir or repo, skipping',
+                        level=0)
+        elif file_count == 1:
+            # fix master if needed
+            if links[master]:
+                log('master incorrect but fixable, fixing')
+                cfile = [f for f in children if not links[f]][0]
+                rm(master)
+                copy(cfile, master)
+
+            # setup any child links
+            for c in children:
+                link(master, c)
+
+            if home_exists:
+                r = prompt(fname, 'exists in in both the repo and home dir,',
+                        'replace home version?')
+                if r:
+                    log('replacing home version of', fname, level=1)
+                    rm(home_file)
+                    home_link(master, home_file)
+                else:
+                    log('replacing repo version of', fname, level=1)
+                    rm(master)
+                    home_move(home_file, master)
+                    home_link(master, home_file)
+            else:
+                log(fname, 'new from repo to home', level=1)
+                home_link(master, home_file)
+        elif file_count > 1:
+            pass
+
+    def print_op(op, *args):
+        if op == 'c':
+            log('COPY:', args[0], '=>', args[1], level=1)
+        elif op == 'm':
+            log('MOVE:', args[0], '=>', args[1], level=1)
+        elif op == 'l':
+            log('LINK:', args[1], '=>', args[0], level=1)
+        elif op == 'r':
+            log('DELETE:', args[0], level=1)
+
+    if args.dry_run:
+        log('dry-run, not executing any operations', level=1)
+        for op in operations:
+            print_op(*op)
+    else:
+        pass
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -224,8 +306,9 @@ if __name__ == '__main__':
             }
 
     # TODO: make the default value for verbose 0 again
-    parser.add_argument('--verbose', '-v', action='count', default=4)
+    parser.add_argument('--verbose', '-v', action='count', default=0)
     parser.add_argument('--hard', action='store_true')
+    parser.add_argument('--dry-run', '-n', action='store_true')
     parser.add_argument('action', choices=valid_actions)
     parser.add_argument('category', nargs='*',
             default=socket.gethostname())
