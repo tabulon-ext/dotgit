@@ -7,6 +7,8 @@ import sys
 import json
 import subprocess
 import shutil
+import filecmp
+from pathlib import Path
 
 home = os.environ['HOME']
 filelist = 'filelist'
@@ -47,13 +49,25 @@ class FileOperations:
                 self.rm(path)
             self.operations.append(('d', path))
 
+    def samefile(self, src, dest, allow_link=False):
+        if os.path.isfile(src) and os.path.isfile(dest):
+            if allow_link:
+                if os.path.samefile(dest, src):
+                    return True
+            elif not os.path.islink(dest) and filecmp.cmp(src, dest):
+                    return True
+            self.rm(dest)
+        return False
+
     def copy(self, src, dest):
         self.makedirs(dest)
-        self.operations.append(('c', src, dest))
+        if not self.samefile(src, dest):
+            self.operations.append(('c', src, dest))
 
     def move(self, src, dest):
         self.makedirs(dest)
-        self.operations.append(('m', src, dest))
+        if not self.samefile(src, dest):
+            self.operations.append(('m', src, dest))
 
     def home_move(self, src, dest):
         if args.hard:
@@ -63,7 +77,9 @@ class FileOperations:
 
     def link(self, src, dest):
         self.makedirs(dest)
-        self.operations.append(('l', src, dest))
+        if not self.samefile(src, dest, allow_link=True):
+            src = os.path.relpath(src, os.path.dirname(dest))
+            self.operations.append(('l', src, dest))
 
     def home_link(self, src, dest):
         if args.hard:
@@ -284,10 +300,6 @@ def run_update(active_files):
     for fname in active_files:
         categories = active_files[fname]
 
-        home_file = os.path.join(home, fname)
-        home_links = os.path.islink(home_file)
-        home_exists = os.path.isfile(home_file) and not home_links
-
         files = {}
         links = {}
         master = None
@@ -299,14 +311,27 @@ def run_update(active_files):
                 master = full
             else:
                 children.append(full)
-            files[full] = os.path.isfile(full)
             links[full] = os.path.islink(full)
+            files[full] = os.path.isfile(full) and not links[full]
 
         file_count = len([f for f in files if files[f]])
         link_count = len([f for f in links if links[f]])
 
+        home_file = os.path.join(home, fname)
+        # file_in_home: true if file lives in home/different from repo
+        if args.hard:
+            file_in_home = os.path.islink(home_file)
+            file_in_home = not file_in_home and os.path.isfile(home_file)
+        else:
+            if os.path.islink(home_file):
+                dotfiles_path = Path(os.path.realpath(dotfiles))
+                home_path = Path(os.path.realpath(home_file))
+                file_in_home = not dotfiles_path in home_path.parents
+            else:
+                file_in_home = os.path.isfile(home_file)
+
         if file_count == 0 and link_count == 0:
-            if home_exists:
+            if file_in_home:
                 log(fname, 'new in repo from home', level=1)
                 ops.home_move(home_file, master)
                 ops.home_link(master, home_file)
@@ -327,23 +352,35 @@ def run_update(active_files):
             for c in children:
                 ops.link(master, c)
 
-            if home_exists:
-                r = prompt(fname, 'exists in in both the repo and home dir,',
-                        'replace home version?')
+            if file_in_home:
+                if args.hard:
+                    if filecmp.cmp(master, home_file):
+                        continue
+                    r = False
+                else:
+                    r = prompt(fname + ' exists in in both the repo and home'
+                            'dir, replace home version?')
                 if r:
                     log('replacing home version of', fname, level=1)
-                    ops.rm(home_file)
                     ops.home_link(master, home_file)
                 else:
                     log('replacing repo version of', fname, level=1)
-                    ops.rm(master)
                     ops.home_move(home_file, master)
-                    ops.home_link(master, home_file)
+                    if not args.hard:
+                        ops.home_link(master, home_file)
             else:
-                log(fname, 'new from repo to home', level=1)
+                if not os.path.isfile(home_file):
+                    log(fname, 'new from repo to home', level=1)
                 ops.home_link(master, home_file)
         elif file_count > 1:
             pass
+        elif link_count >= 1:
+            pass
+        else:
+            log('unexpected file logic, please report an issue on github',
+                    'with level 3 verbose output (re-run with -vvv)',
+                    level=0)
+            sys.exit(1)
 
     ops.run_operations()
 
@@ -358,7 +395,6 @@ if __name__ == '__main__':
             'diff',
             }
 
-    # TODO: make the default value for verbose 0 again
     parser.add_argument('--verbose', '-v', action='count', default=0)
     parser.add_argument('--hard', action='store_true')
     parser.add_argument('--dry-run', '-n', action='store_true')
