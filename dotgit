@@ -6,6 +6,7 @@ import socket
 import sys
 import json
 import subprocess
+import shutil
 
 home = os.environ['HOME']
 filelist = 'filelist'
@@ -34,6 +35,76 @@ class Git:
     def commit(self, msg):
         log('git committing "{}"'.format(msg))
         self.run(['git', 'commit', '-m', msg])
+
+class FileOperations:
+    def __init__(self):
+        self.operations = []
+
+    def makedirs(self, path):
+        path = os.path.dirname(path)
+        if not os.path.isdir(path):
+            if os.path.isfile(path):
+                self.rm(path)
+            self.operations.append(('d', path))
+
+    def copy(self, src, dest):
+        self.makedirs(dest)
+        self.operations.append(('c', src, dest))
+
+    def move(self, src, dest):
+        self.makedirs(dest)
+        self.operations.append(('m', src, dest))
+
+    def home_move(self, src, dest):
+        if not args.hard:
+            self.move(src, dest)
+
+    def link(self, src, dest):
+        self.makedirs(dest)
+        self.operations.append(('l', src, dest))
+
+    def home_link(self, src, dest):
+        if args.hard:
+            self.copy(src, dest)
+        else:
+            self.link(src, dest)
+
+    def rm(self, src):
+        self.operations.append(('r', src))
+
+    def print_op(self, op, *args):
+        if op == 'c':
+            log('COPY:', args[0], '=>', args[1], level=1)
+        elif op == 'm':
+            log('MOVE:', args[0], '=>', args[1], level=1)
+        elif op == 'l':
+            log('LINK:', args[1], '=>', args[0], level=1)
+        elif op == 'd':
+            log('MKDIR:', args[0], level=1)
+        elif op == 'r':
+            log('DELETE:', args[0], level=1)
+
+    def run_operations(self):
+        if args.dry_run:
+            log('dry-run, not executing any operations', level=1)
+            for op in self.operations:
+                self.print_op(*op)
+            return
+
+        for op in self.operations:
+            self.print_op(*op)
+            op, files = op[0], op[1:]
+
+            if op == 'c':
+                shutil.copy(files[0], files[1])
+            elif op == 'm':
+                shutil.move(files[0], files[1])
+            elif op == 'l':
+                os.symlink(files[0], files[1])
+            elif op == 'd':
+                os.makedirs(files[0])
+            elif op == 'r':
+                os.remove(files[0])
 
 # level 0: errors
 # level 1: informational
@@ -193,25 +264,7 @@ def gen_fname(category, filename):
     return os.path.join(dotfiles, category), filename
 
 def run_update(active_files):
-    # file operations
-    operations = []
-
-    def copy(src, dest):
-        operations.append(('c', src, dest))
-    def move(src, dest):
-        operations.append(('m', src, dest))
-    def home_move(src, dest):
-        if not args.hard:
-            move(src, dest)
-    def link(src, dest):
-        operations.append(('l', src, dest))
-    def home_link(src, dest):
-        if args.hard:
-            copy(src, dest)
-        else:
-            link(src, dest)
-    def rm(src):
-        operations.append(('r', src))
+    ops = FileOperations()
 
     for fname in active_files:
         categories = active_files[fname]
@@ -240,10 +293,10 @@ def run_update(active_files):
         if file_count == 0 and link_count == 0:
             if home_exists:
                 log(fname, 'new in repo from home', level=1)
-                home_move(home_file, master)
-                home_link(master, home_file)
+                ops.home_move(home_file, master)
+                ops.home_link(master, home_file)
                 for c in children:
-                    link(master, c)
+                    ops.link(master, c)
             else:
                 log(fname, 'is not in your home dir or repo, skipping',
                         level=0)
@@ -252,47 +305,32 @@ def run_update(active_files):
             if links[master]:
                 log('master incorrect but fixable, fixing')
                 cfile = [f for f in children if not links[f]][0]
-                rm(master)
-                copy(cfile, master)
+                ops.rm(master)
+                ops.copy(cfile, master)
 
             # setup any child links
             for c in children:
-                link(master, c)
+                ops.link(master, c)
 
             if home_exists:
                 r = prompt(fname, 'exists in in both the repo and home dir,',
                         'replace home version?')
                 if r:
                     log('replacing home version of', fname, level=1)
-                    rm(home_file)
-                    home_link(master, home_file)
+                    ops.rm(home_file)
+                    ops.home_link(master, home_file)
                 else:
                     log('replacing repo version of', fname, level=1)
-                    rm(master)
-                    home_move(home_file, master)
-                    home_link(master, home_file)
+                    ops.rm(master)
+                    ops.home_move(home_file, master)
+                    ops.home_link(master, home_file)
             else:
                 log(fname, 'new from repo to home', level=1)
-                home_link(master, home_file)
+                ops.home_link(master, home_file)
         elif file_count > 1:
             pass
 
-    def print_op(op, *args):
-        if op == 'c':
-            log('COPY:', args[0], '=>', args[1], level=1)
-        elif op == 'm':
-            log('MOVE:', args[0], '=>', args[1], level=1)
-        elif op == 'l':
-            log('LINK:', args[1], '=>', args[0], level=1)
-        elif op == 'r':
-            log('DELETE:', args[0], level=1)
-
-    if args.dry_run:
-        log('dry-run, not executing any operations', level=1)
-        for op in operations:
-            print_op(*op)
-    else:
-        pass
+    ops.run_operations()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
