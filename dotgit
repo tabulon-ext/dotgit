@@ -56,7 +56,9 @@ class FileOperations:
         self.operations.append(('m', src, dest))
 
     def home_move(self, src, dest):
-        if not args.hard:
+        if args.hard:
+            self.copy(src, dest)
+        else:
             self.move(src, dest)
 
     def link(self, src, dest):
@@ -85,6 +87,19 @@ class FileOperations:
             log('DELETE:', args[0], level=1)
 
     def run_operations(self):
+        # remove duplicate makedirs
+        dirs = []
+        nops = []
+        for op in self.operations:
+            if op[0] == 'd':
+                if op[1] in dirs:
+                    continue
+                dirs.append(op[1])
+            nops.append(op)
+        self.operations = nops
+        del dirs
+        del nops
+
         if args.dry_run:
             log('dry-run, not executing any operations', level=1)
             for op in self.operations:
