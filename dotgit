@@ -10,7 +10,7 @@ import shutil
 import filecmp
 from pathlib import Path
 
-home = os.environ['HOME']
+home = os.path.expanduser('~')
 filelist = 'filelist'
 dotfiles = 'dotfiles'
 
@@ -49,12 +49,18 @@ class FileOperations:
                 self.rm(path)
             self.operations.append(('d', path))
 
-    def samefile(self, src, dest, allow_link=False):
-        if os.path.isfile(src) and os.path.isfile(dest):
-            if allow_link:
-                if os.path.samefile(dest, src):
+    def linked(self, src, dest):
+        if os.path.isfile(dest):
+            if os.path.isfile(src):
+                if os.path.samefile(src, dest):
                     return True
-            elif not os.path.islink(dest) and filecmp.cmp(src, dest):
+            self.rm(dest)
+        return False
+
+    def samefile(self, src, dest):
+        if os.path.isfile(dest):
+            if os.path.isfile(src):
+                if not os.path.islink(dest) and filecmp.cmp(src, dest):
                     return True
             self.rm(dest)
         return False
@@ -77,7 +83,7 @@ class FileOperations:
 
     def link(self, src, dest):
         self.makedirs(dest)
-        if not self.samefile(src, dest, allow_link=True):
+        if not self.linked(src, dest):
             src = os.path.relpath(src, os.path.dirname(dest))
             self.operations.append(('l', src, dest))
 
@@ -176,6 +182,10 @@ def prompt(question, default=True):
 def initialize_repo():
     '''makes the current dir a dotgit repo'''
 
+    if os.path.samefile(os.getcwd(), home):
+        log('refusing to run dotgit in your home directory, aborting', level=0)
+        sys.exit(1)
+
     log('initializing dotgit repo')
 
     git.init()
@@ -193,7 +203,7 @@ def safety_checks():
 
     log('running safety checks')
 
-    if os.getcwd() == home:
+    if os.path.samefile(os.getcwd(), home):
         log('refusing to run dotgit in your home directory, aborting', level=0)
         sys.exit(1)
 
@@ -342,10 +352,9 @@ def run_update(active_files):
                         level=0)
         elif file_count == 1:
             # fix master if needed
-            if links[master]:
+            if not files[master]:
                 log('master incorrect but fixable, fixing')
                 cfile = [f for f in children if not links[f]][0]
-                ops.rm(master)
                 ops.copy(cfile, master)
 
             # setup any child links
